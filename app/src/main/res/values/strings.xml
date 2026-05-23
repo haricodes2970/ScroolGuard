@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">ScrollGuard</string>
+    <string name="app_title">ScrollGuard</string>
+    <string name="app_subtitle">Block Reels &amp; Shorts scrolling. Everything else works normally.</string>
+    <string name="toggle_enable_blocking">Enable Scroll Blocking</string>
+    <string name="status_enable_accessibility">⚠️ Enable accessibility service first</string>
+    <string name="status_active">🛡️ Scroll blocking is ACTIVE</string>
+    <string name="status_paused">⏸ Scroll blocking is paused</string>
+    <string name="accessibility_service_description">ScrollGuard blocks vertical scrolling only in Instagram Reels and YouTube Shorts. Stories, DMs, search, and taps work normally. No data is collected.</string>
+    <string name="blocked_apps_list">Targets (v2):\n• Instagram — Reels tab only\n• YouTube — Shorts only\n\nTaps always pass through. Other app areas are untouched.</string>
+    <string name="grace_period_label">Allow scrolling for (minutes) when entering Reels/Shorts</string>
+    <string name="grace_period_immediate">0 min — block scrolling immediately</string>
+    <string name="grace_period_minutes">%1$d min free scrolling, then lock</string>
+    <string name="notification_channel_name">Scroll timer</string>
+    <string name="notification_channel_desc">Shows remaining free-scroll time in Reels/Shorts</string>
+    <string name="notification_grace_period">Free scrolling: %1$d:%2$02d remaining</string>
+    <string name="notification_blocking_active">Reels/Shorts scroll locked</string>
+</resources>
