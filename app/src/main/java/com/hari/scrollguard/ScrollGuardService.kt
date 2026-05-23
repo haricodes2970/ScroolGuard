@@ -4,9 +4,10 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
-import android.os.Build
+import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 
 class ScrollGuardService : AccessibilityService() {
@@ -14,15 +15,18 @@ class ScrollGuardService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var notificationHelper: ScrollGuardNotification
 
+    private var windowManager: WindowManager? = null
+    private var overlayView: OverlayView? = null
+
     private var foregroundPackage: String? = null
     private var inFeedSection = false
     private var gracePeriodEndMs = 0L
     private var graceTickRunnable: Runnable? = null
-    private var lastCounterGestureMs = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         notificationHelper = ScrollGuardNotification(this)
         isEnabled = isBlockingEnabledInPrefs(this)
         refreshFeedContext()
@@ -31,6 +35,7 @@ class ScrollGuardService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (!isEnabled) {
             onLeaveFeedSection()
+            removeOverlay()
             return
         }
 
@@ -40,46 +45,20 @@ class ScrollGuardService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> refreshFeedContext()
-
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                val pkg = event.packageName?.toString() ?: foregroundPackage ?: return
-                if (pkg !in feedMonitoredPackages) return
-                handleViewScrolled(event, pkg)
-            }
-        }
-    }
-
-    private fun handleViewScrolled(event: AccessibilityEvent, packageName: String) {
-        val root = rootInActiveWindow ?: return
-        try {
-            if (!FeedDetector.isInScrollableFeed(packageName, root)) return
-
-            if (!inFeedSection) {
-                inFeedSection = true
-                onEnterFeedSection()
-            }
-
-            if (!shouldBlockScrolling()) return
-
-            val deltaY = extractScrollDeltaY(event)
-            if (deltaY == 0) return
-
-            val now = System.currentTimeMillis()
-            if (now - lastCounterGestureMs < COUNTER_GESTURE_COOLDOWN_MS) return
-            lastCounterGestureMs = now
-            injectCounterScroll(deltaY)
-        } finally {
-            root.recycle()
         }
     }
 
     private fun refreshFeedContext() {
         mainHandler.post {
             val pkg = foregroundPackage ?: rootInActiveWindow?.packageName?.toString()
-            if (pkg == null) return@post
+            if (pkg == null) {
+                removeOverlay()
+                return@post
+            }
 
             if (pkg !in feedMonitoredPackages) {
                 if (inFeedSection) onLeaveFeedSection()
+                removeOverlay()
                 return@post
             }
 
@@ -93,10 +72,19 @@ class ScrollGuardService : AccessibilityService() {
                     }
                     !inFeed && inFeedSection -> onLeaveFeedSection()
                 }
+                updateOverlay()
             } finally {
                 root.recycle()
             }
         }
+    }
+
+    private fun updateOverlay() {
+        if (!isEnabled || !inFeedSection || !shouldBlockScrolling()) {
+            removeOverlay()
+            return
+        }
+        addOverlay()
     }
 
     private fun onEnterFeedSection() {
@@ -108,6 +96,7 @@ class ScrollGuardService : AccessibilityService() {
             gracePeriodEndMs = 0L
             notificationHelper.showBlockingActive()
         }
+        updateOverlay()
     }
 
     private fun onLeaveFeedSection() {
@@ -115,6 +104,7 @@ class ScrollGuardService : AccessibilityService() {
         gracePeriodEndMs = 0L
         stopGraceTicker()
         notificationHelper.dismiss()
+        removeOverlay()
     }
 
     private fun shouldBlockScrolling(): Boolean {
@@ -134,10 +124,12 @@ class ScrollGuardService : AccessibilityService() {
                 val remaining = gracePeriodEndMs - System.currentTimeMillis()
                 if (remaining > 0) {
                     notificationHelper.showGracePeriod(remaining)
+                    removeOverlay()
                     mainHandler.postDelayed(this, 1000L)
                 } else {
                     gracePeriodEndMs = 0L
                     notificationHelper.showBlockingActive()
+                    updateOverlay()
                 }
             }
         }
@@ -150,44 +142,41 @@ class ScrollGuardService : AccessibilityService() {
         graceTickRunnable = null
     }
 
-    private fun extractScrollDeltaY(event: AccessibilityEvent): Int {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            return event.scrollDeltaY
-        }
-        // API 24–27: infer direction from scroll position when delta unavailable.
-        return when {
-            event.scrollY > 0 -> 1
-            event.scrollY < 0 -> -1
-            else -> 0
-        }
+    fun addOverlay() {
+        if (overlayView != null) return
+        val wm = windowManager ?: return
+
+        val view = OverlayView(this)
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        wm.addView(view, params)
+        overlayView = view
     }
 
-    /**
-     * Undo a vertical scroll by swiping the opposite direction across the feed center.
-     */
-    private fun injectCounterScroll(scrollDeltaY: Int) {
-        val dm = resources.displayMetrics
-        val centerX = dm.widthPixels / 2f
-        val centerY = dm.heightPixels / 2f
-        val distance = (dm.heightPixels * 0.38f).coerceIn(280f, 900f)
-
-        val path = Path()
-        if (scrollDeltaY > 0) {
-            // Content moved down → user swiped up for next item → swipe down to undo.
-            path.moveTo(centerX, centerY - distance / 2f)
-            path.lineTo(centerX, centerY + distance / 2f)
-        } else {
-            path.moveTo(centerX, centerY + distance / 2f)
-            path.lineTo(centerX, centerY - distance / 2f)
+    fun removeOverlay() {
+        val view = overlayView ?: return
+        try {
+            windowManager?.removeView(view)
+        } catch (_: IllegalArgumentException) {
+            // Already removed
         }
+        overlayView = null
+    }
 
-        val stroke = GestureDescription.StrokeDescription(path, 0, 160)
+    fun injectTap(x: Float, y: Float) {
+        val path = Path().apply { moveTo(x, y) }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 50)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
         dispatchGesture(gesture, null, null)
     }
 
     override fun onInterrupt() {
-        onLeaveFeedSection()
+        mainHandler.post { removeOverlay() }
     }
 
     override fun onDestroy() {
@@ -205,11 +194,14 @@ class ScrollGuardService : AccessibilityService() {
             set(value) {
                 field = value
                 if (!value) {
-                    instance?.onLeaveFeedSection()
+                    instance?.mainHandler?.post {
+                        instance?.onLeaveFeedSection()
+                    }
+                } else {
+                    instance?.refreshFeedContext()
                 }
             }
 
-        /** Apps where we detect Reels/Shorts sub-sections (not whole-app blocking). */
         val feedMonitoredPackages: Set<String> = setOf(
             "com.instagram.android",
             "com.google.android.youtube"
@@ -218,7 +210,6 @@ class ScrollGuardService : AccessibilityService() {
         private const val PREFS_NAME = "scrollguard_prefs"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_GRACE_MINUTES = "grace_period_minutes"
-        private const val COUNTER_GESTURE_COOLDOWN_MS = 350L
 
         fun persistEnabled(context: Context, enabled: Boolean) {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

@@ -6,7 +6,7 @@
     <string name="status_enable_accessibility">⚠️ Enable accessibility service first</string>
     <string name="status_active">🛡️ Scroll blocking is ACTIVE</string>
     <string name="status_paused">⏸ Scroll blocking is paused</string>
-    <string name="accessibility_service_description">ScrollGuard blocks vertical scrolling only in Instagram Reels and YouTube Shorts. Stories, DMs, search, and taps work normally. No data is collected.</string>
+    <string name="accessibility_service_description">ScrollGuard shows a touch overlay in Instagram Reels and YouTube Shorts that blocks vertical swipes and re-injects taps. Stories, DMs, and search are untouched. No data is collected.</string>
     <string name="blocked_apps_list">Targets (v2):\n• Instagram — Reels tab only\n• YouTube — Shorts only\n\nTaps always pass through. Other app areas are untouched.</string>
     <string name="grace_period_label">Allow scrolling for (minutes) when entering Reels/Shorts</string>
     <string name="grace_period_immediate">0 min — block scrolling immediately</string>
